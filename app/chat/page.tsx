@@ -20,7 +20,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [targetThought, setTargetThought] = useState('');
-  const [targetTags, setTargetTags] = useState([]);
+  const [targetTags, setTargetTags] = useState<string[]>([]);
   const [myNickname, setMyNickname] = useState('');
   const [roomId, setRoomId] = useState('');
 
