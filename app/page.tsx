@@ -4,7 +4,8 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { io } from 'socket.io-client';
 
-const socket = io('http://localhost:4000', { autoConnect: false });
+// ★ 수정 1: autoConnect: false 삭제! 화면 켜지면 무조건 미리 연결해두기!
+const socket = io('http://localhost:4000');
 
 export default function Home() {
   const router = useRouter();
@@ -24,10 +25,9 @@ export default function Home() {
       setUsername(savedName || '익명 사용자');
     }
 
-    // ★ 수정: server.js가 보내는 'matched' 신호로 변경!
     socket.on('matched', (data: any) => {
       console.log('서버로부터 매칭 성공 신호 수신:', data);
-      localStorage.setItem('currentRoomId', data.room.roomId); // ★ server.js 구조에 맞게 방 번호 저장
+      localStorage.setItem('currentRoomId', data.room.roomId);
       setIsMatching(false);
       alert('비슷한 고민을 가진 상대를 찾았습니다!');
       router.push('/chat');
@@ -64,13 +64,13 @@ export default function Home() {
   const startMatching = () => {
     if (!thought || selectedTags.length === 0) return;
     
-    if (!socket.connected) socket.connect();
     setIsMatching(true);
 
     localStorage.setItem('userThought', thought);
     localStorage.setItem('userTags', JSON.stringify(selectedTags));
 
-    // ★ 수정: server.js가 기다리는 'join_queue' 신호로 발송!
+    // ★ 수정 2: 이미 소켓이 연결되어 있으니 안심하고 바로 쏘기!
+    console.log("서버로 매칭 요청 발송!", thought);
     socket.emit('join_queue', {
       nickname: username,
       text: thought,
