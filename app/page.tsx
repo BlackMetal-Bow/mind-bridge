@@ -2,6 +2,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { io } from 'socket.io-client'; // ◀ 소켓 부품 추가
+
+// 지호님 매칭 서버(4000번 포트) 주소로 직접 무전기 주파수 맞춤
+const socket = io('http://localhost:4000', { autoConnect: false });
 
 export default function Home() {
   const router = useRouter();
@@ -12,17 +16,29 @@ export default function Home() {
   const [isMatching, setIsMatching] = useState(false);
   const [username, setUsername] = useState('');
 
-  // 1. 로그인 여부 및 사용자 정보 체크
+  // 1. 로그인 여부 및 사용자 정보 체크 + 소켓 리스너 등록
   useEffect(() => {
     const isLoggedIn = localStorage.getItem('isLoggedIn');
     const savedName = localStorage.getItem('nickname');
 
     if (!isLoggedIn) {
-      // 로그인 안 되어 있으면 로그인 페이지로 강제 이동
       router.push('/login');
     } else {
       setUsername(savedName || '익명 사용자');
     }
+
+    // ★ 지호님 매칭 서버가 "매칭 성공했어! 방 번호는 이거야" 라고 신호(matching:success)를 보내주길 대기
+    socket.on('matching:success', (data: { roomId: string }) => {
+      console.log('서버로부터 매칭 성공 신호 수신:', data.roomId);
+      localStorage.setItem('currentRoomId', data.roomId); // 방 주소 저장
+      setIsMatching(false);
+      alert('비슷한 고민을 가진 상대를 찾았습니다!');
+      router.push('/chat'); // 매칭이 '진짜 성사되었을 때만' 채팅방으로 이동!
+    });
+
+    return () => {
+      socket.off('matching:success');
+    };
   }, [router]);
 
   // 2. 로그아웃 함수
@@ -49,19 +65,25 @@ export default function Home() {
     }
   };
 
+  // ★ 수정한 진짜 매칭 시작 함수 (서버에 통신 요청)
   const startMatching = () => {
     if (!thought || selectedTags.length === 0) return;
+    
+    // 소켓 서버 연결
+    if (!socket.connected) socket.connect();
     setIsMatching(true);
 
-    setTimeout(() => {
-      localStorage.setItem('userThought', thought);
-      localStorage.setItem('userTags', JSON.stringify(selectedTags));
-      setIsMatching(false);
-      router.push('/chat');
-    }, 2500);
+    localStorage.setItem('userThought', thought);
+    localStorage.setItem('userTags', JSON.stringify(selectedTags));
+
+    // ★ 지호님 매칭 서버 규격(nickname, text, tags)에 정확히 맞춰서 매칭 요청 무전 발송!
+    socket.emit('matching:request', {
+      nickname: username,
+      text: thought,
+      tags: selectedTags
+    });
   };
 
-  // 로그인 체크 중일 때 깜빡임 방지를 위해 닉네임이 로드될 때까지 빈 화면 처리 (선택사항)
   if (!username) return <div className="min-h-screen bg-slate-50" />;
 
   return (
