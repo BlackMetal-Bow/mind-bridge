@@ -2,10 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { io } from 'socket.io-client';
-
-// 화면이 켜지면 4000번 매칭 서버로 자동 무전 대기
-const socket = io('http://localhost:4000');
+import { socket } from './socket'; // ★ 새로 만든 공유 무전기 가져오기!
 
 export default function Home() {
   const router = useRouter();
@@ -25,16 +22,13 @@ export default function Home() {
       setUsername(savedName || '익명 사용자');
     }
 
-    // ★ 지호님 서버가 쏴주는 "matched" 신호를 정확하게 대기합니다.
     socket.on('matched', (data: any) => {
       console.log('서버로부터 매칭 성공 신호 수신:', data);
-      
-      // 지호님 서버 규격(data.room.roomId)에 맞춰 방 번호를 정확히 추출하여 저장
       if (data?.room?.roomId) {
         localStorage.setItem('currentRoomId', data.room.roomId);
         setIsMatching(false);
         alert('비슷한 고민을 가진 상대를 찾았습니다!');
-        router.push('/chat'); // 진짜 매칭되었을 때만 채팅방 이동
+        router.push('/chat'); 
       }
     });
 
@@ -59,23 +53,17 @@ export default function Home() {
   ];
 
   const toggleTag = (tag: string) => {
-    if (selectedTags.includes(tag)) {
-      setSelectedTags(selectedTags.filter((t) => t !== tag));
-    } else {
-      setSelectedTags([...selectedTags, tag]);
-    }
+    if (selectedTags.includes(tag)) setSelectedTags(selectedTags.filter((t) => t !== tag));
+    else setSelectedTags([...selectedTags, tag]);
   };
 
   const startMatching = () => {
     if (!thought || selectedTags.length === 0) return;
-    
     setIsMatching(true);
 
     localStorage.setItem('userThought', thought);
     localStorage.setItem('userTags', JSON.stringify(selectedTags));
 
-    // ★ 지호님 서버가 딱 기다리고 있는 "join_queue" 채널로 무전 발송!
-    console.log("서버로 매칭 요청 발송!", thought);
     socket.emit('join_queue', {
       nickname: username,
       text: thought,
