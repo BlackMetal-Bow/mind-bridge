@@ -4,10 +4,8 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { io } from 'socket.io-client';
 
-// 지호님의 4000번 매칭 서버 소켓으로 연결 주파수 고정
 const socket = io('http://localhost:4000', { autoConnect: false });
 
-// 대화 메시지 한 개당 들어갈 데이터 규격 설정
 interface MessageItem {
   roomId: string;
   nickname: string;
@@ -18,7 +16,6 @@ interface MessageItem {
 export default function ChatPage() {
   const router = useRouter();
   
-  // 상태 관리
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [targetThought, setTargetThought] = useState('');
@@ -26,7 +23,6 @@ export default function ChatPage() {
   const [myNickname, setMyNickname] = useState('');
   const [roomId, setRoomId] = useState('');
 
-  // 1. 페이지 로드 시 데이터 세팅 및 소켓 연결
   useEffect(() => {
     const thought = localStorage.getItem('userThought');
     const tags = JSON.parse(localStorage.getItem('userTags') || '[]');
@@ -38,55 +34,50 @@ export default function ChatPage() {
     setMyNickname(nickname);
     setRoomId(savedRoomId);
 
-    // 소켓 연결 시작
     if (!socket.connected) socket.connect();
 
-    // ★ [수정 및 추가]: 서버에 나 이 방 소속이라고 확실하게 다시 도장 찍기
+    // ★ [방 재입장]: 지호님 서버에 새로 추가한 'join_room' 채널로 내 방 번호 전송!
     if (savedRoomId) {
       socket.emit('join_room', { roomId: savedRoomId });
-      console.log('서버에 방 입장 신호 송신:', savedRoomId);
+      console.log('채팅방 재입장 신호 전송 완료:', savedRoomId);
     }
 
-    // ★ [수정]: 지호님 서버 규격에 맞춰 receive_message 채널로 대기
+    // ★ [메시지 수신]: 지호님 서버가 쏴주는 진짜 대화 채널 'receive_message' 대기!
     socket.on('receive_message', (data: MessageItem) => {
-      console.log('실시간 메시지 수신 성공:', data);
-      setMessages((prev) => [...prev, data]); // 대화창에 메시지 누적
+      console.log('실시간 메시지 수신:', data);
+      setMessages((prev) => [...prev, data]);
     });
 
-    // 상대방이 나갔을 때 알림 처리 (지호님 서버에 구현되어 있는 기능!)
+    // 상대방 퇴장 알림 처리
     socket.on('partner_disconnected', (data: { message: string }) => {
       alert(data.message);
     });
 
-    // 화면 나갈 때 무전기 깨끗하게 끄기
     return () => {
       socket.off('receive_message');
       socket.off('partner_disconnected');
     };
   }, []);
 
-  // 2. 메시지 전송 함수
   const sendMessage = () => {
-    if (!inputValue.trim()) return; // 빈 칸이면 전송 금지
+    if (!inputValue.trim()) return;
 
-    // ★ [수정]: 지호님 매칭 서버(server.js)가 딱 요구하는 채널(send_message)과 3가지 데이터 규격 전송
+    // ★ [메시지 송신]: 지호님 서버가 기다리는 'send_message' 채널로 데이터 발송!
     socket.emit('send_message', {
       roomId: roomId,
       nickname: myNickname,
       message: inputValue.trim()
     });
 
-    setInputValue(''); // 입력창 초기화
+    setInputValue('');
   };
 
-  // 3. 엔터키 누르면 전송되는 편의 기능
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       sendMessage();
     }
   };
 
-  // 4. 나가기 버튼 함수
   const handleLeave = () => {
     if (confirm('채팅방을 나가시겠습니까?')) {
       localStorage.removeItem('currentRoomId');
@@ -97,8 +88,6 @@ export default function ChatPage() {
   return (
     <main className="min-h-screen bg-indigo-50 p-4 font-sans">
       <div className="max-w-md mx-auto bg-white shadow-2xl rounded-3xl h-[92vh] flex flex-col overflow-hidden">
-        
-        {/* 上단바 */}
         <div className="p-4 border-b bg-white flex justify-between items-center">
           <span className="font-bold text-indigo-600">익명 상담방 ({myNickname})</span>
           <button onClick={handleLeave} className="text-xs text-slate-400 hover:text-red-500 transition-colors">
@@ -106,7 +95,6 @@ export default function ChatPage() {
           </button>
         </div>
         
-        {/* 상대방 고민 요약 (카드 형태) */}
         <div className="p-4 bg-indigo-50 m-4 rounded-2xl border border-indigo-100">
           <p className="text-[10px] font-bold text-indigo-400 mb-1 uppercase tracking-wider">상대방의 고민 주제</p>
           <div className="flex flex-wrap gap-1 mb-2">
@@ -119,7 +107,6 @@ export default function ChatPage() {
           <p className="text-sm text-slate-700 italic line-clamp-3">"{targetThought}"</p>
         </div>
 
-        {/* 메시지 구역 (진짜 실시간 대화가 출력되는 곳) */}
         <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-white">
           {messages.length === 0 ? (
             <div className="text-center text-xs text-slate-300 mt-4">
@@ -131,11 +118,8 @@ export default function ChatPage() {
               return (
                 <div key={index} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
                   <div className={`p-3 rounded-2xl max-w-[80%] text-sm ${
-                    isMe 
-                      ? 'bg-indigo-500 text-white rounded-tr-none' 
-                      : 'bg-slate-100 text-slate-700 rounded-tl-none'
+                    isMe ? 'bg-indigo-500 text-white rounded-tr-none' : 'bg-slate-100 text-slate-700 rounded-tl-none'
                   }`}>
-                    {/* 내가 보낸 게 아니라면 위에 보낸 사람 닉네임 띄워주기 */}
                     {!isMe && <p className="text-[10px] text-indigo-400 font-bold mb-1">{msg.nickname}</p>}
                     {msg.message}
                   </div>
@@ -145,7 +129,6 @@ export default function ChatPage() {
           )}
         </div>
 
-        {/* 입력 구역 */}
         <div className="p-4 bg-slate-50 border-t flex gap-2">
           <input 
             className="flex-1 border-none rounded-full px-5 py-3 text-sm focus:ring-2 focus:ring-indigo-400 outline-none" 
@@ -154,10 +137,7 @@ export default function ChatPage() {
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
           />
-          <button 
-            onClick={sendMessage}
-            className="bg-indigo-500 text-white w-12 h-12 rounded-full flex items-center justify-center shadow-md hover:bg-indigo-600 transition-all"
-          >
+          <button onClick={sendMessage} className="bg-indigo-500 text-white w-12 h-12 rounded-full flex items-center justify-center shadow-md hover:bg-indigo-600 transition-all">
             →
           </button>
         </div>
