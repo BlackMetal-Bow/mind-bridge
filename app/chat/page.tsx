@@ -1,10 +1,9 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { io } from 'socket.io-client';
 
-// ★ 수정: autoConnect 끄는 옵션 삭제! (메인 화면처럼 바로 연결되도록)
 const socket = io('http://localhost:4000');
 
 interface MessageItem {
@@ -24,6 +23,9 @@ export default function ChatPage() {
   const [myNickname, setMyNickname] = useState('');
   const [roomId, setRoomId] = useState('');
 
+  // ★ 추가: 내 닉네임을 소켓 안에서 안전하게 꺼내 쓰기 위한 비밀 주머니
+  const myNicknameRef = useRef('');
+
   useEffect(() => {
     const thought = localStorage.getItem('userThought');
     const tags = JSON.parse(localStorage.getItem('userTags') || '[]');
@@ -32,54 +34,62 @@ export default function ChatPage() {
 
     if (thought) setTargetThought(thought);
     if (tags) setTargetTags(tags);
+    
     setMyNickname(nickname);
+    myNicknameRef.current = nickname; // 내 닉네임 저장
     setRoomId(savedRoomId);
 
-    // ★ [핵심 타이밍 교정]: 무조건 소켓이 "완전히 연결된 직후"에만 방에 입장하도록 설정!
     const joinRoom = () => {
       if (savedRoomId) {
         socket.emit('join_room', { roomId: savedRoomId });
-        console.log('채팅방 재입장 신호 전송 완료 (연결 확인됨):', savedRoomId);
+        console.log('채팅방 재입장 신호 전송 완료:', savedRoomId);
       }
     };
 
     if (socket.connected) {
-      joinRoom(); // 이미 연결되어 있으면 바로 입장
+      joinRoom();
     } else {
-      socket.on('connect', joinRoom); // 연결되는 순간 입장하도록 예약
+      socket.on('connect', joinRoom);
     }
 
-    // 메시지 수신 대기
-    socket.on('receive_message', (data: MessageItem) => {
-      console.log('실시간 메시지 수신 성공:', data);
+    // 메시지 수신 로직 (정밀 타겟팅)
+    const handleReceiveMessage = (data: MessageItem) => {
+      // ★ 핵심: 내가 보낸 메시지는 이미 내 화면에 띄웠으므로, 서버가 다시 쏴주는 건 씹어버립니다! (중복 방지)
+      if (data.nickname === myNicknameRef.current) return;
+      
+      console.log('상대방 메시지 수신:', data);
       setMessages((prev) => [...prev, data]);
-    });
+    };
 
-    // ★ 보너스: 만약 서버에서 메시지를 거절하면 왜 거절했는지 알림 띄워주기
-    socket.on('chat_error', (err: { message: string }) => {
-      alert("서버 전송 에러: " + err.message);
-    });
+    socket.on('receive_message', handleReceiveMessage);
 
-    socket.on('partner_disconnected', (data: { message: string }) => {
+    const handlePartnerDisconnect = (data: { message: string }) => {
       alert(data.message);
-    });
+    };
+
+    socket.on('partner_disconnected', handlePartnerDisconnect);
 
     return () => {
       socket.off('connect', joinRoom);
-      socket.off('receive_message');
-      socket.off('chat_error');
-      socket.off('partner_disconnected');
+      socket.off('receive_message', handleReceiveMessage);
+      socket.off('partner_disconnected', handlePartnerDisconnect);
     };
   }, []);
 
   const sendMessage = () => {
     if (!inputValue.trim()) return;
 
-    socket.emit('send_message', {
+    const newMsg = {
       roomId: roomId,
       nickname: myNickname,
       message: inputValue.trim()
-    });
+    };
+
+    // 1. 서버로 메시지 쏘기 (상대방 화면에 뜨도록)
+    socket.emit('send_message', newMsg);
+
+    // 2. ★ 내 화면에는 0.001초 만에 즉시 말풍선 띄우기! (서버 기다리지 않음)
+    setMessages((prev) => [...prev, newMsg]);
 
     setInputValue('');
   };
