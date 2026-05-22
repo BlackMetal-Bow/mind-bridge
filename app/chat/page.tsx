@@ -1,140 +1,105 @@
-'use client';
+require("dotenv").config();
 
-import React, { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { socket } from '../socket'; // 절대 경로 에러 시 이 주소 유지
+const express = require("express");
+const http = require("http");
+const cors = require("cors");
+const { Server } = require("socket.io");
 
-interface MessageItem {
-  roomId: string;
-  nickname: string;
-  message: string;
-  sentAt?: string;
+const app = express();
+const server = http.createServer(app);
+
+const PORT = process.env.PORT || 4000;
+
+// -----------------------------
+// 기본 미들웨어 설정
+// -----------------------------
+app.use(cors({
+  origin: "*", // 모든 주소 허용
+}));
+
+app.use(express.json());
+
+// -----------------------------
+// Socket.io 서버 설정
+// -----------------------------
+const io = new Server(server, {
+  cors: {
+    origin: "*", // 소켓 통신도 무조건 허용
+    methods: ["GET", "POST"]
+  },
+});
+
+let openai = null;
+
+if (process.env.OPENAI_API_KEY) {
+  const OpenAI = require("openai");
+  const OpenAIClient = OpenAI.default || OpenAI;
+  openai = new OpenAIClient({ apiKey: process.env.OPENAI_API_KEY });
+  console.log("OpenAI API 연결 준비 완료");
+} else {
+  console.log("OpenAI API 키 없음 → 키워드 기반 감정 분석 사용");
 }
 
-export default function ChatPage() {
-  const router = useRouter();
-  
-  const [messages, setMessages] = useState<MessageItem[]>([]);
-  const [inputValue, setInputValue] = useState('');
-  const [targetThought, setTargetThought] = useState('');
-  const [targetTags, setTargetTags] = useState<string[]>([]);
-  const [myNickname, setMyNickname] = useState('');
-  const [roomId, setRoomId] = useState('');
+const waitingUsers = [];
+const rooms = new Map();
 
-  useEffect(() => {
-    const thought = localStorage.getItem('userThought');
-    const tags = JSON.parse(localStorage.getItem('userTags') || '[]');
-    const nickname = localStorage.getItem('nickname') || '익명 사용자';
-    const savedRoomId = localStorage.getItem('currentRoomId') || '';
+app.get("/", (req, res) => res.send("AI Matching Socket Server is running"));
+app.get("/health", (req, res) => res.json({ ok: true, waitingUserCount: waitingUsers.length, roomCount: rooms.size }));
 
-    if (thought) setTargetThought(thought);
-    if (tags) setTargetTags(tags);
-    setMyNickname(nickname);
-    setRoomId(savedRoomId);
+// -----------------------------
+// Socket.io 연결 처리
+// -----------------------------
+io.on("connection", (socket) => {
+  console.log("사용자 접속:", socket.id);
 
-    const joinRoom = () => {
-      if (savedRoomId) {
-        socket.emit('join_room', { roomId: savedRoomId });
+  // 사용자가 매칭 대기열에 들어올 때
+  socket.on("join_queue", async (payload) => {
+    try {
+      const nickname = payload?.nickname || "익명";
+      const text = payload?.text || "";
+      const tags = Array.isArray(payload?.tags) ? payload.tags : [];
+
+      if (!text.trim()) {
+        socket.emit("queue_error", { message: "감정이나 고민 내용을 입력해주세요." });
+        return;
       }
-    };
 
-    if (socket.connected) {
-      joinRoom();
-    } else {
-      socket.on('connect', joinRoom);
-    }
+      const emotionData = await analyzeEmotion(text);
 
-    const handleReceiveMessage = (data: MessageItem) => {
-      console.log('상대방 메시지 수신:', data);
-      setMessages((prev) => [...prev, data]);
-    };
+      const currentUser = {
+        socketId: socket.id,
+        nickname,
+        text,
+        tags,
+        emotion: emotionData.emotion,
+        intensity: emotionData.intensity,
+        topic: emotionData.topic,
+        confidence: emotionData.confidence ?? 0.7,
+        joinedAt: Date.now(),
+      };
 
-    // ★ 중복 등록을 방지하기 위해, 리스너를 켜기 전에 한 번 깨끗하게 밀어버립니다.
-    socket.off('receive_message');
-    socket.on('receive_message', handleReceiveMessage);
+      const validation = validateMatchingRequest(currentUser);
 
-    const handlePartnerDisconnect = (data: { message: string }) => {
-      alert(data.message);
-    };
+      if (!validation.ok) {
+        socket.emit("queue_error", { message: validation.message, analysis: { emotion: currentUser.emotion, intensity: currentUser.intensity, topic: currentUser.topic } });
+        console.log("매칭 요청 거절:", validation.reason, currentUser);
+        return;
+      }
 
-    socket.off('partner_disconnected');
-    socket.on('partner_disconnected', handlePartnerDisconnect);
+      console.log("매칭 대기 요청:", currentUser);
+      const matchedUser = findBestMatch(currentUser);
 
-    return () => {
-      socket.off('connect', joinRoom);
-      socket.off('receive_message'); // ★ 깔끔하게 채널 오프
-      socket.off('partner_disconnected');
-    };
-  }, []);
+      if (matchedUser) {
+        removeWaitingUser(matchedUser.socketId);
+        const roomId = createRoomId();
 
-  const sendMessage = () => {
-    if (!inputValue.trim()) return;
+        socket.join(roomId);
 
-    const newMsg = {
-      roomId: roomId,
-      nickname: myNickname,
-      message: inputValue.trim()
-    };
+        const matchedSocket = io.sockets.sockets.get(matchedUser.socketId);
+        if (matchedSocket) matchedSocket.join(roomId);
 
-    socket.emit('send_message', newMsg);
-    setMessages((prev) => [...prev, newMsg]);
-    setInputValue('');
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      sendMessage();
-    }
-  };
-
-  const handleLeave = () => {
-    if (confirm('채팅방을 나가시겠습니까?')) {
-      localStorage.removeItem('currentRoomId');
-      window.location.href = '/';
-    }
-  };
-
-  return (
-    <main className="min-h-screen bg-indigo-50 p-4 font-sans">
-      <div className="max-w-md mx-auto bg-white shadow-2xl rounded-3xl h-[92vh] flex flex-col overflow-hidden">
-        <div className="p-4 border-b bg-white flex justify-between items-center">
-          <span className="font-bold text-indigo-600">익명 상담방 ({myNickname})</span>
-          <button onClick={handleLeave} className="text-xs text-slate-400 hover:text-red-500 transition-colors">나가기</button>
-        </div>
-        
-        <div className="p-4 bg-indigo-50 m-4 rounded-2xl border border-indigo-100">
-          <p className="text-[10px] font-bold text-indigo-400 mb-1 uppercase tracking-wider">상대방의 고민 주제</p>
-          <div className="flex flex-wrap gap-1 mb-2">
-            {targetTags.map(tag => (
-              <span key={tag} className="text-[11px] bg-white text-indigo-600 px-2 py-0.5 rounded-md border border-indigo-200">{tag}</span>
-            ))}
-          </div>
-          <p className="text-sm text-slate-700 italic line-clamp-3">"{targetThought}"</p>
-        </div>
-
-        <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-white">
-          {messages.length === 0 ? (
-            <div className="text-center text-xs text-slate-300 mt-4">매칭이 완료되었습니다. 따뜻한 대화를 나누어보세요!</div>
-          ) : (
-            messages.map((msg, index) => {
-              const isMe = msg.nickname === myNickname;
-              return (
-                <div key={index} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`p-3 rounded-2xl max-w-[80%] text-sm ${isMe ? 'bg-indigo-500 text-white rounded-tr-none' : 'bg-slate-100 text-slate-700 rounded-tl-none'}`}>
-                    {!isMe && <p className="text-[10px] text-indigo-400 font-bold mb-1">{msg.nickname}</p>}
-                    {msg.message}
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        <div className="p-4 bg-slate-50 border-t flex gap-2">
-          <input className="flex-1 border-none rounded-full px-5 py-3 text-sm focus:ring-2 focus:ring-indigo-400 outline-none" placeholder="따뜻한 한마디를 건네보세요..." value={inputValue} onChange={(e) => setInputValue(e.target.value)} onKeyDown={handleKeyDown}/>
-          <button onClick={sendMessage} className="bg-indigo-500 text-white w-12 h-12 rounded-full flex items-center justify-center shadow-md hover:bg-indigo-600 transition-all">→</button>
-        </div>
-      </div>
-    </main>
-  );
-}
+        const roomInfo = {
+          roomId,
+          users: [
+            { socketId: currentUser.socketId, nickname: currentUser.nickname, emotion: currentUser.emotion, topic: currentUser.topic },
+            { socketId: matchedUser.socketId, nickname: matched
