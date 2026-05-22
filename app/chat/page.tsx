@@ -9,8 +9,10 @@ const socket = io('http://localhost:4000', { autoConnect: false });
 
 // 대화 메시지 한 개당 들어갈 데이터 규격 설정
 interface MessageItem {
+  roomId: string;
   nickname: string;
   message: string;
+  sentAt?: string;
 }
 
 export default function ChatPage() {
@@ -39,18 +41,27 @@ export default function ChatPage() {
     // 소켓 연결 시작
     if (!socket.connected) socket.connect();
 
-    // ★ 중요: 지호님 서버로 "나 이 방에 들어왔어"라고 먼저 알려주기 위한 로직
-    // (서버 코드 규격에 맞춰서 소켓이 연결되면 서버가 알아서 방을 묶어줍니다)
+    // ★ [수정 및 추가]: 서버에 나 이 방 소속이라고 확실하게 다시 도장 찍기
+    if (savedRoomId) {
+      socket.emit('join_room', { roomId: savedRoomId });
+      console.log('서버에 방 입장 신호 송신:', savedRoomId);
+    }
 
-    // ★ 지호님 서버가 쏴주는 실시간 대화 신호('chat:message')를 대기
-    socket.on('chat:message', (data: MessageItem) => {
-      console.log('실시간 메시지 수신:', data);
+    // ★ [수정]: 지호님 서버 규격에 맞춰 receive_message 채널로 대기
+    socket.on('receive_message', (data: MessageItem) => {
+      console.log('실시간 메시지 수신 성공:', data);
       setMessages((prev) => [...prev, data]); // 대화창에 메시지 누적
     });
 
-    // 화면 나갈 때 무전기 끄기
+    // 상대방이 나갔을 때 알림 처리 (지호님 서버에 구현되어 있는 기능!)
+    socket.on('partner_disconnected', (data: { message: string }) => {
+      alert(data.message);
+    });
+
+    // 화면 나갈 때 무전기 깨끗하게 끄기
     return () => {
-      socket.off('chat:message');
+      socket.off('receive_message');
+      socket.off('partner_disconnected');
     };
   }, []);
 
@@ -58,8 +69,8 @@ export default function ChatPage() {
   const sendMessage = () => {
     if (!inputValue.trim()) return; // 빈 칸이면 전송 금지
 
-    // 지호님 매칭 서버(server.js)가 딱 요구하는 3가지 데이터 규격 전송
-    socket.emit('chat:message', {
+    // ★ [수정]: 지호님 매칭 서버(server.js)가 딱 요구하는 채널(send_message)과 3가지 데이터 규격 전송
+    socket.emit('send_message', {
       roomId: roomId,
       nickname: myNickname,
       message: inputValue.trim()
@@ -87,7 +98,7 @@ export default function ChatPage() {
     <main className="min-h-screen bg-indigo-50 p-4 font-sans">
       <div className="max-w-md mx-auto bg-white shadow-2xl rounded-3xl h-[92vh] flex flex-col overflow-hidden">
         
-        {/* 상단바 */}
+        {/* 上단바 */}
         <div className="p-4 border-b bg-white flex justify-between items-center">
           <span className="font-bold text-indigo-600">익명 상담방 ({myNickname})</span>
           <button onClick={handleLeave} className="text-xs text-slate-400 hover:text-red-500 transition-colors">
