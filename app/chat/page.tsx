@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { socket } from '../socket'; // ★ 메인 화면과 똑같은 공유 무전기 사용!
+import { socket } from '../socket'; // 절대 경로 에러 시 이 주소 유지
 
 interface MessageItem {
   roomId: string;
@@ -21,8 +21,6 @@ export default function ChatPage() {
   const [myNickname, setMyNickname] = useState('');
   const [roomId, setRoomId] = useState('');
 
-  const myNicknameRef = useRef('');
-
   useEffect(() => {
     const thought = localStorage.getItem('userThought');
     const tags = JSON.parse(localStorage.getItem('userTags') || '[]');
@@ -31,12 +29,9 @@ export default function ChatPage() {
 
     if (thought) setTargetThought(thought);
     if (tags) setTargetTags(tags);
-    
     setMyNickname(nickname);
-    myNicknameRef.current = nickname;
     setRoomId(savedRoomId);
 
-    // 페이지를 넘어가도 소켓이 안 끊기므로, 이미 방에 들어와 있지만 안전장치로 한 번 더 확인
     const joinRoom = () => {
       if (savedRoomId) {
         socket.emit('join_room', { roomId: savedRoomId });
@@ -54,18 +49,21 @@ export default function ChatPage() {
       setMessages((prev) => [...prev, data]);
     };
 
+    // ★ 중복 등록을 방지하기 위해, 리스너를 켜기 전에 한 번 깨끗하게 밀어버립니다.
+    socket.off('receive_message');
     socket.on('receive_message', handleReceiveMessage);
 
     const handlePartnerDisconnect = (data: { message: string }) => {
       alert(data.message);
     };
 
+    socket.off('partner_disconnected');
     socket.on('partner_disconnected', handlePartnerDisconnect);
 
     return () => {
       socket.off('connect', joinRoom);
-      socket.off('receive_message', handleReceiveMessage);
-      socket.off('partner_disconnected', handlePartnerDisconnect);
+      socket.off('receive_message'); // ★ 깔끔하게 채널 오프
+      socket.off('partner_disconnected');
     };
   }, []);
 
