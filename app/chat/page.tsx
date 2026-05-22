@@ -4,7 +4,8 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { io } from 'socket.io-client';
 
-const socket = io('http://localhost:4000', { autoConnect: false });
+// ★ 수정: autoConnect 끄는 옵션 삭제! (메인 화면처럼 바로 연결되도록)
+const socket = io('http://localhost:4000');
 
 interface MessageItem {
   roomId: string;
@@ -34,27 +35,39 @@ export default function ChatPage() {
     setMyNickname(nickname);
     setRoomId(savedRoomId);
 
-    if (!socket.connected) socket.connect();
+    // ★ [핵심 타이밍 교정]: 무조건 소켓이 "완전히 연결된 직후"에만 방에 입장하도록 설정!
+    const joinRoom = () => {
+      if (savedRoomId) {
+        socket.emit('join_room', { roomId: savedRoomId });
+        console.log('채팅방 재입장 신호 전송 완료 (연결 확인됨):', savedRoomId);
+      }
+    };
 
-    // ★ [방 재입장]: 지호님 서버에 새로 추가한 'join_room' 채널로 내 방 번호 전송!
-    if (savedRoomId) {
-      socket.emit('join_room', { roomId: savedRoomId });
-      console.log('채팅방 재입장 신호 전송 완료:', savedRoomId);
+    if (socket.connected) {
+      joinRoom(); // 이미 연결되어 있으면 바로 입장
+    } else {
+      socket.on('connect', joinRoom); // 연결되는 순간 입장하도록 예약
     }
 
-    // ★ [메시지 수신]: 지호님 서버가 쏴주는 진짜 대화 채널 'receive_message' 대기!
+    // 메시지 수신 대기
     socket.on('receive_message', (data: MessageItem) => {
-      console.log('실시간 메시지 수신:', data);
+      console.log('실시간 메시지 수신 성공:', data);
       setMessages((prev) => [...prev, data]);
     });
 
-    // 상대방 퇴장 알림 처리
+    // ★ 보너스: 만약 서버에서 메시지를 거절하면 왜 거절했는지 알림 띄워주기
+    socket.on('chat_error', (err: { message: string }) => {
+      alert("서버 전송 에러: " + err.message);
+    });
+
     socket.on('partner_disconnected', (data: { message: string }) => {
       alert(data.message);
     });
 
     return () => {
+      socket.off('connect', joinRoom);
       socket.off('receive_message');
+      socket.off('chat_error');
       socket.off('partner_disconnected');
     };
   }, []);
@@ -62,7 +75,6 @@ export default function ChatPage() {
   const sendMessage = () => {
     if (!inputValue.trim()) return;
 
-    // ★ [메시지 송신]: 지호님 서버가 기다리는 'send_message' 채널로 데이터 발송!
     socket.emit('send_message', {
       roomId: roomId,
       nickname: myNickname,
