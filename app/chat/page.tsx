@@ -1,105 +1,93 @@
-require("dotenv").config();
+'use client';
 
-const express = require("express");
-const http = require("http");
-const cors = require("cors");
-const { Server } = require("socket.io");
+import React, { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { socket } from '@/app/socket';
 
-const app = express();
-const server = http.createServer(app);
+export default function ChatPage() {
+  const router = useRouter();
+  const [messages, setMessages] = useState<any[]>([]);
+  const [inputValue, setInputValue] = useState('');
+  const [myNickname, setMyNickname] = useState('');
+  const [roomId, setRoomId] = useState('');
 
-const PORT = process.env.PORT || 4000;
+  useEffect(() => {
+    const savedRoomId = localStorage.getItem('currentRoomId') || '';
+    const nickname = localStorage.getItem('nickname') || '익명 사용자';
+    
+    setRoomId(savedRoomId);
+    setMyNickname(nickname);
 
-// -----------------------------
-// 기본 미들웨어 설정
-// -----------------------------
-app.use(cors({
-  origin: "*", // 모든 주소 허용
-}));
+    if (savedRoomId) {
+      socket.emit('join_room', { roomId: savedRoomId });
+    }
 
-app.use(express.json());
+    // ★ 채팅 중복 해결: 서버에서 메아리쳐서 돌아온 메시지만 화면에 그린다!
+    const handleReceive = (data: any) => {
+      setMessages((prev) => [...prev, data]);
+    };
 
-// -----------------------------
-// Socket.io 서버 설정
-// -----------------------------
-const io = new Server(server, {
-  cors: {
-    origin: "*", // 소켓 통신도 무조건 허용
-    methods: ["GET", "POST"]
-  },
-});
+    socket.off('receive_message');
+    socket.on('receive_message', handleReceive);
 
-let openai = null;
+    return () => {
+      socket.off('receive_message', handleReceive);
+    };
+  }, []);
 
-if (process.env.OPENAI_API_KEY) {
-  const OpenAI = require("openai");
-  const OpenAIClient = OpenAI.default || OpenAI;
-  openai = new OpenAIClient({ apiKey: process.env.OPENAI_API_KEY });
-  console.log("OpenAI API 연결 준비 완료");
-} else {
-  console.log("OpenAI API 키 없음 → 키워드 기반 감정 분석 사용");
+  const sendMessage = () => {
+    if (!inputValue.trim()) return;
+
+    // ★ 내가 쓴 글을 서버로 쏘기만 함 (여기서 setMessages를 안 하기 때문에 2번 뜰 일이 없음!)
+    socket.emit('send_message', {
+      roomId: roomId,
+      nickname: myNickname,
+      message: inputValue.trim()
+    });
+    
+    setInputValue(''); // 텍스트 입력창만 비워줌
+  };
+
+  const handleLeave = () => {
+    if (confirm('채팅방을 나가시겠습니까?')) {
+      localStorage.removeItem('currentRoomId');
+      window.location.href = '/';
+    }
+  };
+
+  return (
+    <main className="min-h-screen bg-indigo-50 p-4">
+      <div className="max-w-md mx-auto bg-white shadow-xl rounded-3xl h-[92vh] flex flex-col">
+        <div className="p-4 border-b flex justify-between items-center">
+          <span className="font-bold text-indigo-600">익명 상담방 ({myNickname})</span>
+          <button onClick={handleLeave} className="text-xs text-slate-400 hover:text-red-500">나가기</button>
+        </div>
+
+        <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-white">
+          {messages.map((msg, index) => {
+            const isMe = msg.nickname === myNickname;
+            return (
+              <div key={index} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                <div className={`p-3 rounded-2xl max-w-[80%] text-sm ${isMe ? 'bg-indigo-500 text-white rounded-tr-none' : 'bg-slate-100 text-slate-700 rounded-tl-none'}`}>
+                  {!isMe && <p className="text-[10px] text-indigo-400 font-bold mb-1">{msg.nickname}</p>}
+                  {msg.message}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="p-4 bg-slate-50 border-t flex gap-2">
+          <input 
+            className="flex-1 border-none rounded-full px-5 py-3 text-sm outline-none bg-white shadow-sm" 
+            placeholder="메시지를 입력하세요..." 
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+          />
+          <button onClick={sendMessage} className="bg-indigo-500 text-white w-12 h-12 rounded-full">→</button>
+        </div>
+      </div>
+    </main>
+  );
 }
-
-const waitingUsers = [];
-const rooms = new Map();
-
-app.get("/", (req, res) => res.send("AI Matching Socket Server is running"));
-app.get("/health", (req, res) => res.json({ ok: true, waitingUserCount: waitingUsers.length, roomCount: rooms.size }));
-
-// -----------------------------
-// Socket.io 연결 처리
-// -----------------------------
-io.on("connection", (socket) => {
-  console.log("사용자 접속:", socket.id);
-
-  // 사용자가 매칭 대기열에 들어올 때
-  socket.on("join_queue", async (payload) => {
-    try {
-      const nickname = payload?.nickname || "익명";
-      const text = payload?.text || "";
-      const tags = Array.isArray(payload?.tags) ? payload.tags : [];
-
-      if (!text.trim()) {
-        socket.emit("queue_error", { message: "감정이나 고민 내용을 입력해주세요." });
-        return;
-      }
-
-      const emotionData = await analyzeEmotion(text);
-
-      const currentUser = {
-        socketId: socket.id,
-        nickname,
-        text,
-        tags,
-        emotion: emotionData.emotion,
-        intensity: emotionData.intensity,
-        topic: emotionData.topic,
-        confidence: emotionData.confidence ?? 0.7,
-        joinedAt: Date.now(),
-      };
-
-      const validation = validateMatchingRequest(currentUser);
-
-      if (!validation.ok) {
-        socket.emit("queue_error", { message: validation.message, analysis: { emotion: currentUser.emotion, intensity: currentUser.intensity, topic: currentUser.topic } });
-        console.log("매칭 요청 거절:", validation.reason, currentUser);
-        return;
-      }
-
-      console.log("매칭 대기 요청:", currentUser);
-      const matchedUser = findBestMatch(currentUser);
-
-      if (matchedUser) {
-        removeWaitingUser(matchedUser.socketId);
-        const roomId = createRoomId();
-
-        socket.join(roomId);
-
-        const matchedSocket = io.sockets.sockets.get(matchedUser.socketId);
-        if (matchedSocket) matchedSocket.join(roomId);
-
-        const roomInfo = {
-          roomId,
-          users: [
-            { socketId: currentUser.socketId, nickname: currentUser.nickname, emotion: currentUser.emotion, topic: currentUser.topic },
-            { socketId: matchedUser.socketId, nickname: matched
