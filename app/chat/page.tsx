@@ -85,6 +85,42 @@ export default function ChatPage() {
     setMessage('');
   };
 
+  const reportUser = async () => {
+  const reason = prompt('신고 사유를 입력해주세요.');
+
+  if (!reason || reason.trim() === '') {
+    return;
+  }
+
+  try {
+    const response = await fetch('http://localhost:4000/api/report', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        roomId,
+        reporterNickname: nickname,
+        reportedNickname: '상대방',
+        reason,
+        recentMessages: messages,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      alert(data.message || '신고 접수에 실패했습니다.');
+      return;
+    }
+
+    alert('신고가 접수되었습니다.');
+  } catch (error) {
+    console.error('신고 요청 오류:', error);
+    alert('서버 오류로 신고 접수에 실패했습니다.');
+  }
+};
+
   const leaveChat = () => {
     if (confirm('채팅방을 나가시겠습니까?')) {
       localStorage.removeItem('roomId');
@@ -104,15 +140,24 @@ export default function ChatPage() {
       <div className="max-w-md mx-auto bg-white shadow-2xl rounded-3xl h-[92vh] flex flex-col overflow-hidden">
         {/* 상단바 */}
         <div className="p-4 border-b bg-white flex justify-between items-center">
-          <span className="font-bold text-indigo-600">익명 상담방</span>
+  <span className="font-bold text-indigo-600">익명 상담방</span>
 
-          <button
-            onClick={leaveChat}
-            className="text-xs text-slate-400 hover:text-red-500"
-          >
-            나가기
-          </button>
-        </div>
+  <div className="flex gap-3">
+    <button
+      onClick={reportUser}
+      className="text-xs text-red-400 hover:text-red-600"
+    >
+      신고
+    </button>
+
+    <button
+      onClick={leaveChat}
+      className="text-xs text-slate-400 hover:text-red-500"
+    >
+      나가기
+    </button>
+  </div>
+</div>
 
         {/* 고민 요약 카드 */}
         <div className="p-4 bg-indigo-50 m-4 rounded-2xl border border-indigo-100">
