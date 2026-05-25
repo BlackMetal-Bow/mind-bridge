@@ -12,23 +12,20 @@ export default function Home() {
   const [isMatching, setIsMatching] = useState(false);
   const [username, setUsername] = useState('');
 
-  // 1. 페이지 켜질 때 로그인 여부 확인 & 무전기 세팅
   useEffect(() => {
     const isLoggedIn = localStorage.getItem('isLoggedIn');
     const savedName = localStorage.getItem('nickname');
 
-    // ★ 로그인(회원가입) 안 되어 있으면 로그인 페이지로 쫓아냄!
     if (!isLoggedIn) {
       router.push('/login');
     } else {
       setUsername(savedName || '익명 사용자');
     }
 
-    // ★ 우리가 고생해서 만든 '완벽 방어막' 매칭 로직
     const handleMatched = (data: any) => {
       console.log('매칭 성공 데이터:', data);
       const roomId = data?.room?.roomId || data?.roomId;
-      
+
       if (roomId) {
         localStorage.setItem('currentRoomId', roomId);
         setIsMatching(false);
@@ -48,7 +45,6 @@ export default function Home() {
     };
   }, [router]);
 
-  // 로그아웃 로직 복구
   const handleLogout = () => {
     if (confirm('로그아웃 하시겠습니까?')) {
       localStorage.removeItem('isLoggedIn');
@@ -58,10 +54,11 @@ export default function Home() {
     }
   };
 
-  // 태그 선택 UI 복구
+  const goToProfile = () => router.push('/profile');
+
   const availableTags = [
-    '📚 학업/진로', '🤝 인간관계', '❤️ 연애/사랑', 
-    '🏠 가족문제', '😢 우울/불안', '💰 경제적고민', 
+    '📚 학업/진로', '🤝 인간관계', '❤️ 연애/사랑',
+    '🏠 가족문제', '😢 우울/불안', '💰 경제적고민',
     '🔥 번아웃', '👻 기타'
   ];
 
@@ -98,9 +95,14 @@ export default function Home() {
           </div>
           <span className="text-sm font-bold text-slate-700">{username}님</span>
         </div>
-        <button onClick={handleLogout} className="text-xs font-medium text-slate-400 hover:text-red-500 transition-colors">
-          로그아웃
-        </button>
+        <div className="flex items-center gap-3">
+          <button onClick={goToProfile} className="text-xs font-medium text-indigo-500 hover:text-indigo-700 transition-colors">
+            마이페이지
+          </button>
+          <button onClick={handleLogout} className="text-xs font-medium text-slate-400 hover:text-red-500 transition-colors">
+            로그아웃
+          </button>
+        </div>
       </div>
 
       <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl p-8 space-y-8 border border-slate-100">
@@ -109,7 +111,7 @@ export default function Home() {
           <p className="text-slate-500 text-sm">지금 마음 속 이야기를 들려주세요.</p>
         </div>
         <hr className="border-slate-100" />
-        
+
         <div className="space-y-4">
           <label className="text-sm font-bold text-slate-700 block">어떤 고민인가요?</label>
           <div className="flex flex-wrap gap-2">
@@ -118,9 +120,9 @@ export default function Home() {
                 key={tag}
                 onClick={() => toggleTag(tag)}
                 className={`px-4 py-2.5 rounded-2xl text-xs font-semibold transition-all border ${
-                  selectedTags.includes(tag) 
-                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-md scale-105' 
-                  : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300'
+                  selectedTags.includes(tag)
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-md scale-105'
+                    : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300'
                 }`}
               >
                 {tag}
