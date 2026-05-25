@@ -2,10 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { io } from 'socket.io-client';
-
-// ★ 수정 1: autoConnect: false 삭제! 화면 켜지면 무조건 미리 연결해두기!
-const socket = io('http://localhost:4000');
+import { socket } from '@/app/socket';
 
 export default function Home() {
   const router = useRouter();
@@ -15,29 +12,43 @@ export default function Home() {
   const [isMatching, setIsMatching] = useState(false);
   const [username, setUsername] = useState('');
 
+  // 1. 페이지 켜질 때 로그인 여부 확인 & 무전기 세팅
   useEffect(() => {
     const isLoggedIn = localStorage.getItem('isLoggedIn');
     const savedName = localStorage.getItem('nickname');
 
+    // ★ 로그인(회원가입) 안 되어 있으면 로그인 페이지로 쫓아냄!
     if (!isLoggedIn) {
       router.push('/login');
     } else {
       setUsername(savedName || '익명 사용자');
     }
 
-    socket.on('matched', (data: any) => {
-      console.log('서버로부터 매칭 성공 신호 수신:', data);
-      localStorage.setItem('currentRoomId', data.room.roomId);
-      setIsMatching(false);
-      alert('비슷한 고민을 가진 상대를 찾았습니다!');
-      router.push('/chat');
-    });
+    // ★ 우리가 고생해서 만든 '완벽 방어막' 매칭 로직
+    const handleMatched = (data: any) => {
+      console.log('매칭 성공 데이터:', data);
+      const roomId = data?.room?.roomId || data?.roomId;
+      
+      if (roomId) {
+        localStorage.setItem('currentRoomId', roomId);
+        setIsMatching(false);
+        alert('비슷한 고민을 가진 상대를 찾았습니다!');
+        router.push('/chat');
+      } else {
+        console.error('방 정보 에러:', data);
+      }
+    };
+
+    socket.on('matched', handleMatched);
+    socket.on('waiting', () => alert('상대방을 찾는 중입니다...'));
 
     return () => {
-      socket.off('matched');
+      socket.off('matched', handleMatched);
+      socket.off('waiting');
     };
   }, [router]);
 
+  // 로그아웃 로직 복구
   const handleLogout = () => {
     if (confirm('로그아웃 하시겠습니까?')) {
       localStorage.removeItem('isLoggedIn');
@@ -47,8 +58,7 @@ export default function Home() {
     }
   };
 
-  const goToProfile = () => router.push('/profile');
-
+  // 태그 선택 UI 복구
   const availableTags = [
     '📚 학업/진로', '🤝 인간관계', '❤️ 연애/사랑', 
     '🏠 가족문제', '😢 우울/불안', '💰 경제적고민', 
@@ -65,14 +75,11 @@ export default function Home() {
 
   const startMatching = () => {
     if (!thought || selectedTags.length === 0) return;
-    
     setIsMatching(true);
 
     localStorage.setItem('userThought', thought);
     localStorage.setItem('userTags', JSON.stringify(selectedTags));
 
-    // ★ 수정 2: 이미 소켓이 연결되어 있으니 안심하고 바로 쏘기!
-    console.log("서버로 매칭 요청 발송!", thought);
     socket.emit('join_queue', {
       nickname: username,
       text: thought,
@@ -91,9 +98,6 @@ export default function Home() {
           </div>
           <span className="text-sm font-bold text-slate-700">{username}님</span>
         </div>
-        <button onClick={goToProfile} className="text-xs font-medium text-indigo-500 hover:text-indigo-700 transition-colors mr-3">
-          마이페이지
-        </button>
         <button onClick={handleLogout} className="text-xs font-medium text-slate-400 hover:text-red-500 transition-colors">
           로그아웃
         </button>
@@ -105,6 +109,7 @@ export default function Home() {
           <p className="text-slate-500 text-sm">지금 마음 속 이야기를 들려주세요.</p>
         </div>
         <hr className="border-slate-100" />
+        
         <div className="space-y-4">
           <label className="text-sm font-bold text-slate-700 block">어떤 고민인가요?</label>
           <div className="flex flex-wrap gap-2">
@@ -113,7 +118,9 @@ export default function Home() {
                 key={tag}
                 onClick={() => toggleTag(tag)}
                 className={`px-4 py-2.5 rounded-2xl text-xs font-semibold transition-all border ${
-                  selectedTags.includes(tag) ? 'bg-indigo-600 text-white border-indigo-600 shadow-md scale-105' : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300'
+                  selectedTags.includes(tag) 
+                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-md scale-105' 
+                  : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300'
                 }`}
               >
                 {tag}
@@ -121,6 +128,7 @@ export default function Home() {
             ))}
           </div>
         </div>
+
         <div className="space-y-4">
           <label className="text-sm font-bold text-slate-700 block">고민 내용 적기</label>
           <textarea
@@ -130,10 +138,13 @@ export default function Home() {
             onChange={(e) => setThought(e.target.value)}
           />
         </div>
+
         <button
           onClick={startMatching}
           disabled={!thought || selectedTags.length === 0 || isMatching}
-          className={`w-full py-4 rounded-2xl font-bold text-white transition-all shadow-lg ${isMatching ? 'bg-slate-300' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+          className={`w-full py-4 rounded-2xl font-bold text-white transition-all shadow-lg ${
+            isMatching ? 'bg-slate-300' : 'bg-indigo-600 hover:bg-indigo-700'
+          }`}
         >
           {isMatching ? '비슷한 마음을 찾는 중...' : '매칭 시작하기'}
         </button>
