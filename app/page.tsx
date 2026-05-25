@@ -47,6 +47,8 @@ export default function Home() {
     }
   };
 
+  const goToProfile = () => router.push('/profile');
+
   const availableTags = [
     '📚 학업/진로', '🤝 인간관계', '❤️ 연애/사랑', 
     '🏠 가족문제', '😢 우울/불안', '💰 경제적고민', 
@@ -89,6 +91,9 @@ export default function Home() {
           </div>
           <span className="text-sm font-bold text-slate-700">{username}님</span>
         </div>
+        <button onClick={goToProfile} className="text-xs font-medium text-indigo-500 hover:text-indigo-700 transition-colors mr-3">
+          마이페이지
+        </button>
         <button onClick={handleLogout} className="text-xs font-medium text-slate-400 hover:text-red-500 transition-colors">
           로그아웃
         </button>
